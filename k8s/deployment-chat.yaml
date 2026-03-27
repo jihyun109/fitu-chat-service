@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-service
+  namespace: fitu
+  labels:
+    app: fitu-chat
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fitu-chat
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: fitu-chat
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: chat
+          image: jihyun923/fitu-chat-service:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8081
+          env:
+            - name: SPRING_CONFIG_LOCATION
+              value: /config/chat-secret.yml
+            - name: TZ
+              value: Asia/Seoul
+            - name: JAVA_TOOL_OPTIONS
+              value: "-javaagent:/opt/pyroscope.jar -Duser.timezone=Asia/Seoul -Xms128m -Xmx400m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -XX:ParallelGCThreads=1 -XX:ConcGCThreads=1"
+            - name: PYROSCOPE_APPLICATION_NAME
+              value: "fitu-chat-service"
+            - name: PYROSCOPE_SERVER_ADDRESS
+              value: "http://pyroscope.monitoring.svc.cluster.local:4040"
+            - name: PYROSCOPE_FORMAT
+              value: "jfr"
+            - name: SERVER_SHUTDOWN
+              value: "graceful"
+            - name: SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE
+              value: "20s"
+          resources:
+            requests:
+              cpu: "0.05"
+              memory: 256Mi
+            limits:
+              cpu: "0.6"
+              memory: 700Mi
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: chat-secret
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: chat-secret
+          secret:
+            secretName: chat-secret
