@@ -2,6 +2,9 @@ package com.hsp.fituchat.messaging;
 
 import com.hsp.fituchat.document.ChatMessageDocument;
 import com.hsp.fituchat.repository.ChatMessageRepository;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.stream.*;
@@ -29,12 +32,17 @@ public class ChatMessagePersistConsumer {
     private final String consumerName;
     private final RedisTemplate<String, String> redisTemplate;
     private final ChatMessageRepository chatMessageRepository;
+    private final Timer batchSaveTimer;
+    private final Counter batchSaveCounter;
 
     public ChatMessagePersistConsumer(
             RedisTemplate<String, String> redisTemplate,
-            ChatMessageRepository chatMessageRepository) {
+            ChatMessageRepository chatMessageRepository,
+            MeterRegistry meterRegistry) {
         this.redisTemplate = redisTemplate;
         this.chatMessageRepository = chatMessageRepository;
+        this.batchSaveTimer = meterRegistry.timer("chat.persist.batch.duration");
+        this.batchSaveCounter = meterRegistry.counter("chat.persist.batch.count");
 
         String hostname;
         try {
@@ -86,8 +94,9 @@ public class ChatMessagePersistConsumer {
                     })
                     .toList();
 
-            // 배치 INSERT
-            chatMessageRepository.saveAll(documents);
+            // 배치 INSERT — 저장 시간 측정
+            batchSaveTimer.record(() -> chatMessageRepository.saveAll(documents));
+            batchSaveCounter.increment(documents.size());
 
             // ACK + 삭제
             for (MapRecord<String, Object, Object> record : records) {
