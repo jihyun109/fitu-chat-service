@@ -30,6 +30,10 @@ dependencies {
     // MongoDB
     implementation 'org.springframework.boot:spring-boot-starter-data-mongodb'
 
+    // JPA + MySQL (벤치마크용 — SPRING_PROFILES_ACTIVE=mysql 일 때만 활성화)
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    runtimeOnly 'com.mysql:mysql-connector-j'
+
     // Redis (Pub/Sub + 캐시)
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 
@@ -41,6 +45,16 @@ dependencies {
     // 모니터링
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'io.micrometer:micrometer-registry-prometheus'
+
+    // OpenTelemetry — Operator agent와의 충돌 방지를 위해 SDK 구현체는 가져오지 않음
+    //   (micrometer-tracing-bridge-otel + opentelemetry-exporter-otlp 같이 쓰면
+    //    agent의 SDK와 GlobalOpenTelemetry 등록 경쟁으로 main 스레드 block 발생함)
+    // opentelemetry-api: API/인터페이스만 포함 (SDK 구현체 미포함) → agent와 호환
+    //   Redis pub/sub trace context 수동 inject/extract + 명시 span 코드에서 사용
+    implementation 'io.opentelemetry:opentelemetry-api'
+    // @WithSpan 어노테이션 — agent가 자동으로 span 시작/종료 처리
+    //   STOMP 메시지 핸들러 같이 자동 계측 안 되는 메서드에 부착해 trace에 포함
+    implementation 'io.opentelemetry.instrumentation:opentelemetry-instrumentation-annotations:2.27.0'
 
     // Lombok
     compileOnly 'org.projectlombok:lombok'
