@@ -21,6 +21,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
 public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     private final WebSocketAuthChannelInterceptor webSocketAuthChannelInterceptor;
+    private final StompTracingChannelInterceptor stompTracingChannelInterceptor;
 
     /**
      * 클라이언트가 WebSocket 연결을 맺을 엔드포인트 등록.
@@ -61,12 +62,14 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
     }
 
     /**
-     * 인바운드 채널에 JWT 인증 인터셉터 등록.
-     * STOMP CONNECT 프레임 수신 시 WebSocketAuthChannelInterceptor가 먼저 실행된다.
+     * 인바운드 채널에 인터셉터 등록.
+     * 등록 순서가 곧 실행 순서:
+     *   1) StompTracingChannelInterceptor — 모든 처리를 trace 안에 담기 위해 가장 먼저
+     *   2) WebSocketAuthChannelInterceptor — JWT 인증 (1번이 시작한 trace의 자식 span으로 동작)
      */
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        registration.interceptors(webSocketAuthChannelInterceptor);
+        registration.interceptors(stompTracingChannelInterceptor, webSocketAuthChannelInterceptor);
         // 0.6 vCPU 환경에서 스레드 폭발 방지 — 큐 상한으로 무제한 적재 차단
         registration.taskExecutor()
                 .corePoolSize(4)
