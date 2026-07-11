@@ -2,10 +2,10 @@ spring:
   application:
     name: fitu-chat-service
 
-  data:
-    mongodb:
-      uri: mongodb://mongodb:27017/fitu_chat
+  profiles:
+    default: mongo
 
+  data:
     redis:
       host: redis
       port: 6379
@@ -25,6 +25,10 @@ management:
         http.server.requests: true
     tags:
       application: fitu-chat-service
+  # OpenTelemetry trace 관련 설정은 OTel Java agent가 환경변수로 전달받음
+  # (Instrumentation CRD에서 OTEL_TRACES_SAMPLER, OTEL_EXPORTER_OTLP_ENDPOINT 등)
+  # 로그 패턴의 traceId/spanId 주입은 OTel agent의 logback instrumentation이 자동 처리
+  # (MDC key는 trace_id, span_id — logback-spring.xml에서 그 키로 추출)
 
 server:
   port: 8081

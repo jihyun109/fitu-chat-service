@@ -1,6 +1,8 @@
 package com.hsp.fituchat.error;
 
 import io.jsonwebtoken.ExpiredJwtException;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.api.trace.StatusCode;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -16,6 +18,19 @@ import java.util.List;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    /**
+     * 현재 trace span에 예외 기록 → Tempo에서 5xx trace 검색·분석 가능.
+     * head sampling으로 이미 drop된 trace는 못 살림 (sample된 trace에만 적용).
+     */
+    private void markSpanError(Throwable e) {
+        Span span = Span.current();
+        if (span != null && span.isRecording()) {
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            span.setStatus(StatusCode.ERROR, msg);
+            span.recordException(e);
+        }
+    }
 
     /**
      * @Valid 또는 @Validated 바인딩 에러 처리 (필드 유효성 검증 실패)
@@ -42,6 +57,8 @@ public class GlobalExceptionHandler {
     protected ResponseEntity<ErrorResponse> handleBusinessException(BusinessException e, HttpServletRequest request) {
         log.warn("BusinessException: {}", e.getErrorCode().getMessage());
 
+        markSpanError(e);
+
         ErrorCode errorCode = e.getErrorCode();
         ErrorResponse response = ErrorResponse.of(errorCode, request.getRequestURI());
         return new ResponseEntity<>(response, HttpStatus.valueOf(errorCode.getStatus()));
@@ -63,6 +80,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     protected ResponseEntity<ErrorResponse> handleException(Exception e, HttpServletRequest request) {
         log.error("handleException", e.getMessage(), e);
+
+        markSpanError(e);
 
         ErrorResponse response = ErrorResponse.of(ErrorCode.INTER_SERVER_ERROR, request.getRequestURI());
         return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);

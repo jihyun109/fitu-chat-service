@@ -19,11 +19,17 @@ spec:
     metadata:
       labels:
         app: fitu-chat
+      annotations:
+        # OTel Operator가 이 Pod에 OTel Java agent 자동 주입
+        # 형식: "<namespace>/<Instrumentation 이름>"
+        # fitu_backend와 동일한 Instrumentation 공유 → 일관된 sampler·PII 정책
+        instrumentation.opentelemetry.io/inject-java: "fitu/fitu-java"
     spec:
       terminationGracePeriodSeconds: 30
       containers:
         - name: chat
           image: jihyun923/fitu-chat-service:latest
+          # 매번 Docker Hub에서 pull (로컬 import image 사용 안 함)
           imagePullPolicy: Always
           ports:
             - containerPort: 8081
@@ -32,6 +38,9 @@ spec:
               value: /config/chat-secret.yml
             - name: TZ
               value: Asia/Seoul
+            # OTel trace의 service.name attribute
+            - name: OTEL_SERVICE_NAME
+              value: "fitu-chat"
             - name: JAVA_TOOL_OPTIONS
               value: "-javaagent:/opt/pyroscope.jar -Duser.timezone=Asia/Seoul -Xms128m -Xmx400m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -XX:ParallelGCThreads=1 -XX:ConcGCThreads=1"
             - name: PYROSCOPE_APPLICATION_NAME
@@ -51,6 +60,15 @@ spec:
             limits:
               cpu: "0.6"
               memory: 700Mi
+          # OTel agent + Pyroscope agent 두 개 부착으로 부팅이 늦어질 수 있음
+          # startupProbe가 성공할 때까지 liveness/readiness 검사 안 함
+          # (5s × 36회 = 최대 3분 시작 대기)
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            periodSeconds: 5
+            failureThreshold: 36
           livenessProbe:
             httpGet:
               path: /actuator/health/liveness
