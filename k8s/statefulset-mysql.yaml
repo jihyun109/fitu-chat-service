@@ -1,0 +1,77 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: fitu
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fitu-mysql
+  template:
+    metadata:
+      labels:
+        app: fitu-mysql
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          # 비교 공정성을 위해 MongoDB와 동일한 캐시 크기로 맞춤.
+          # WiredTiger 기본 캐시 ≈ 컨테이너 메모리 50% (256Mi 컨테이너 → ~128M).
+          # MySQL은 별도 설정이 필요해서 innodb-buffer-pool-size를 명시.
+          args:
+            - "--innodb-buffer-pool-size=128M"
+            - "--character-set-server=utf8mb4"
+            - "--collation-server=utf8mb4_unicode_ci"
+            - "--max-connections=200"
+            - "--default-time-zone=+00:00"
+          ports:
+            - containerPort: 3306
+              name: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: mysql-credentials
+                  key: root-password
+            - name: MYSQL_DATABASE
+              value: fitu_chat
+          resources:
+            # MongoDB(256Mi)보다 MySQL은 부팅 메모리 요구가 커서 512Mi로 둠.
+            # 벤치마크 공정성을 원하면 mongodb StatefulSet도 512Mi로 맞출 것.
+            requests:
+              cpu: "0.05"
+              memory: 256Mi
+            limits:
+              cpu: "0.2"
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command:
+                - "/bin/sh"
+                - "-c"
+                - "mysqladmin ping -h 127.0.0.1 -u root -p$MYSQL_ROOT_PASSWORD"
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - "/bin/sh"
+                - "-c"
+                - "mysqladmin ping -h 127.0.0.1 -u root -p$MYSQL_ROOT_PASSWORD"
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 5Gi

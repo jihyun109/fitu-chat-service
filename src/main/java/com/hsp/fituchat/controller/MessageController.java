@@ -2,6 +2,7 @@ package com.hsp.fituchat.controller;
 
 import com.hsp.fituchat.dto.ChatMessageRequestDTO;
 import com.hsp.fituchat.service.ChatMessageService;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.handler.annotation.Header;
@@ -33,9 +34,17 @@ public class MessageController {
      * 세션 속성(simpSessionAttributes)에 저장해 둔 값을 꺼내 사용한다.
      * 반환값이 없으므로 @SendTo 없이 브로커(Redis)를 통해 직접 브로드캐스트한다.
      */
+    @WithSpan("chat.message.handle")
     @MessageMapping("/chat/message")
     public void message(ChatMessageRequestDTO message, @Header("simpSessionAttributes") Map<String, Object> sessionAttrs) {
         Long userId = (Long) sessionAttrs.get("userId");
+
+        // [OTEL-DEBUG] 진단용 — @WithSpan이 동작하면 valid=true, 동작 안 하면 valid=false 또는 traceId=000...
+        io.opentelemetry.api.trace.Span s = io.opentelemetry.api.trace.Span.current();
+        log.info("[OTEL-DEBUG] message() called traceId={} spanId={} valid={}",
+                s.getSpanContext().getTraceId(),
+                s.getSpanContext().getSpanId(),
+                s.getSpanContext().isValid());
 
         chatMessageService.sendMessage(message, userId);
     }

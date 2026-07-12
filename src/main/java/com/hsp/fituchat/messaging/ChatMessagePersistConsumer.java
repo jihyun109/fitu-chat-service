@@ -1,13 +1,17 @@
 package com.hsp.fituchat.messaging;
 
-import com.hsp.fituchat.document.ChatMessageDocument;
-import com.hsp.fituchat.repository.ChatMessageRepository;
+import com.hsp.fituchat.service.ChatMessageRecord;
+import com.hsp.fituchat.service.ChatMessageStore;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.data.redis.connection.stream.*;
+import org.springframework.data.redis.connection.stream.Consumer;
+import org.springframework.data.redis.connection.stream.MapRecord;
+import org.springframework.data.redis.connection.stream.ReadOffset;
+import org.springframework.data.redis.connection.stream.StreamOffset;
+import org.springframework.data.redis.connection.stream.StreamReadOptions;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -18,7 +22,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Redis Stream에서 채팅 메시지를 꺼내서 MongoDB에 배치 저장하는 Consumer.
+ * Redis Stream에서 채팅 메시지를 꺼내서 활성 프로파일의 DB(MongoDB or MySQL)에 배치 저장.
  * 3초마다 폴링하여 쌓인 메시지를 한 번에 saveAll()로 INSERT.
  */
 @Slf4j
@@ -31,16 +35,16 @@ public class ChatMessagePersistConsumer {
 
     private final String consumerName;
     private final RedisTemplate<String, String> redisTemplate;
-    private final ChatMessageRepository chatMessageRepository;
+    private final ChatMessageStore chatMessageStore;
     private final Timer batchSaveTimer;
     private final Counter batchSaveCounter;
 
     public ChatMessagePersistConsumer(
             RedisTemplate<String, String> redisTemplate,
-            ChatMessageRepository chatMessageRepository,
+            ChatMessageStore chatMessageStore,
             MeterRegistry meterRegistry) {
         this.redisTemplate = redisTemplate;
-        this.chatMessageRepository = chatMessageRepository;
+        this.chatMessageStore = chatMessageStore;
         this.batchSaveTimer = meterRegistry.timer("chat.persist.batch.duration");
         this.batchSaveCounter = meterRegistry.counter("chat.persist.batch.count");
 
@@ -80,31 +84,28 @@ public class ChatMessagePersistConsumer {
                 return;
             }
 
-            // MongoDB Document 변환
-            List<ChatMessageDocument> documents = records.stream()
+            List<ChatMessageRecord> messages = records.stream()
                     .map(record -> {
                         Map<Object, Object> fields = record.getValue();
-                        return ChatMessageDocument.builder()
+                        return ChatMessageRecord.builder()
                                 .chatRoomId(fields.get("roomId").toString())
                                 .senderId(Long.parseLong(fields.get("senderId").toString()))
-                                .content(fields.get("content").toString())
                                 .messageType("TALK")
+                                .content(fields.get("content").toString())
                                 .createdAt(LocalDateTime.parse(fields.get("sendTime").toString()))
                                 .build();
                     })
                     .toList();
 
-            // 배치 INSERT — 저장 시간 측정
-            batchSaveTimer.record(() -> chatMessageRepository.saveAll(documents));
-            batchSaveCounter.increment(documents.size());
+            batchSaveTimer.record(() -> chatMessageStore.saveAll(messages));
+            batchSaveCounter.increment(messages.size());
 
-            // ACK + 삭제
             for (MapRecord<String, Object, Object> record : records) {
                 redisTemplate.opsForStream().acknowledge(STREAM_KEY, GROUP_NAME, record.getId());
                 redisTemplate.opsForStream().delete(STREAM_KEY, record.getId());
             }
 
-            log.debug("채팅 메시지 {}건 MongoDB 배치 저장 완료", documents.size());
+            log.debug("채팅 메시지 {}건 배치 저장 완료", messages.size());
 
         } catch (Exception e) {
             log.error("채팅 메시지 배치 저장 실패", e);
